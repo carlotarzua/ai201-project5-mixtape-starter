@@ -61,6 +61,20 @@ The streak logic treated Sunday differently from every other consecutive day. Wh
 **My fix and side-effect check:**  
 I removed the unnecessary Sunday condition and changed the branch to `elif days_since_last == 1:`. This makes every consecutive calendar day increment the streak, including Saturday to Sunday. I reran `pytest tests/test_streaks.py` and all 5 tests passed. I also checked the related behaviors covered by the suite: a new user starts at 1, listening twice on the same day does not double count, normal consecutive days increment, and skipping a day resets the streak.
 
+### Issue #5 — The Last Song in a Playlist Never Shows Up
+
+**How I reproduced it:**  
+Before changing any code, I ran `pytest tests/`. The tests `test_playlist_returns_all_songs` and `test_playlist_returns_songs_in_order` both failed. The test playlist contained 5 songs, but `get_playlist_songs()` returned only 4. The returned titles stopped at `Track 4`, so `Track 5`, the final song, was missing. After applying the fix, I ran `pytest tests/test_playlists.py` and all 3 playlist tests passed.
+
+**How I found the root cause:**  
+I traced the playlist retrieval flow from `routes/playlists.py`, where the `GET /playlists/<playlist_id>/songs` route calls `get_playlist_songs()`, into `services/playlist_service.py`. The SQLAlchemy query correctly joined the playlist entries, filtered by playlist ID, ordered the songs by position, and called `.all()`. I then inspected the return statement and found `songs[:-1]`. This made me confident I had found the exact cause because Python slicing with `[:-1]` returns every element except the last one, which exactly matched the observed behavior of a 5-song playlist returning 4 songs.
+
+**The root cause:**  
+The database query retrieved the complete ordered list of songs, but the return statement intentionally sliced that list with `songs[:-1]`. In Python, that slice excludes the final element. As a result, every non-empty playlist lost its last song during response construction even though the database query had retrieved it correctly.
+
+**My fix and side-effect check:**  
+I changed the return statement from iterating over `songs[:-1]` to iterating over the complete `songs` list. This preserves every retrieved song while keeping the existing database ordering unchanged. I reran `pytest tests/test_playlists.py` and all 3 tests passed. I also checked that the returned songs remained in position order and that an empty playlist still returned an empty list.
+
 <!-- Add one complete RCA entry per fixed bug. -->
 
 ---
