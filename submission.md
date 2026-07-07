@@ -75,7 +75,21 @@ The database query retrieved the complete ordered list of songs, but the return 
 **My fix and side-effect check:**  
 I changed the return statement from iterating over `songs[:-1]` to iterating over the complete `songs` list. This preserves every retrieved song while keeping the existing database ordering unchanged. I reran `pytest tests/test_playlists.py` and all 3 tests passed. I also checked that the returned songs remained in position order and that an empty playlist still returned an empty list.
 
-<!-- Add one complete RCA entry per fixed bug. -->
+---
+
+### Issue #2 — Friends Listening Now Shows Stale Activity
+
+**How I reproduced it:**
+Before changing any code, I used the seeded database and called `get_friends_listening_now()` for the seeded user `darius`. The result included `simone`, whose event was relatively recent, but it also included `nova`, whose listening event was about 2 hours old. This confirmed that the “Listening Now” feed was including stale activity. After changing the threshold, I reran the same check and `nova` no longer appeared. By that later run, the seeded recent events had also aged beyond the new 30-minute window, so the result was empty. I therefore used a controlled regression test to verify both sides of the cutoff: a 10-minute-old event appeared, while a 2-hour-old event did not.
+
+**How I found the root cause:**
+I traced the request flow from `routes/feed.py`, where the `/feed/<user_id>/listening-now` endpoint calls `get_friends_listening_now()`, into `services/feed_service.py`. I inspected how the cutoff time was calculated and found `RECENT_THRESHOLD = timedelta(hours=24)`. The function subtracts this threshold from the current time and returns listening events newer than that cutoff. This made me confident I had found the exact cause because a 24-hour window directly explained why an event from about 2 hours earlier appeared in a feature called “Listening Now.”
+
+**The root cause:**
+The “Listening Now” feed used a 24-hour recency threshold. As a result, a friend who listened many hours earlier could still appear in the feed. The database query was filtering according to the configured cutoff, but the cutoff itself was too large for the intended live-style behavior.
+
+**My fix and side-effect check:**
+I changed `RECENT_THRESHOLD` from `timedelta(hours=24)` to `timedelta(minutes=30)`. This keeps genuinely recent listening activity while excluding stale events from hours earlier. I added a regression test in `tests/test_feed.py` that creates one friend with a listening event from 10 minutes ago and another friend with an event from 2 hours ago. The test verifies that the recent friend appears and the stale friend does not. I ran `pytest tests/test_feed.py`, which passed, and then ran the full test suite, where all 14 tests passed.
 
 ---
 
