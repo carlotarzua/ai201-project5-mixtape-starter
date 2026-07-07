@@ -47,6 +47,20 @@ The data model also uses association tables for many-to-many relationships. For 
 
 ## Root Cause Analyses
 
+### Issue #1 — My Listening Streak Keeps Resetting
+
+**How I reproduced it:**  
+I first ran `pytest tests/` before changing any code. The test `test_streak_increments_on_sunday` failed. The test simulated a user listening on Saturday, June 15, 2024 and then again on Sunday, June 16, 2024. The streak stayed at 1 instead of increasing to 2. I then ran `pytest tests/test_streaks.py` after the fix and all 5 streak tests passed.
+
+**How I found the root cause:**  
+I traced the listening flow from `routes/songs.py`, where the `/songs/<song_id>/listen` endpoint calls `record_listening_event()`, into `services/streak_service.py`. Inside `update_listening_streak()`, I looked at the conditions that compare the current date with `last_listened_at`. The important line was `elif days_since_last == 1 and today.weekday() != 6:`. I verified that Python's `weekday()` uses 6 for Sunday. That made me confident this was the exact cause because the code explicitly prevented the normal consecutive-day increment on Sundays, matching the failing Saturday-to-Sunday test.
+
+**The root cause:**  
+The streak logic treated Sunday differently from every other consecutive day. When exactly one day had passed, the streak incremented only if `today.weekday() != 6`. Since Sunday has a `weekday()` value of 6, a user who listened on Saturday and again on Sunday did not enter the increment branch. Instead, execution fell into the `else` branch and reset the streak to 1 even though the listens happened on consecutive calendar days.
+
+**My fix and side-effect check:**  
+I removed the unnecessary Sunday condition and changed the branch to `elif days_since_last == 1:`. This makes every consecutive calendar day increment the streak, including Saturday to Sunday. I reran `pytest tests/test_streaks.py` and all 5 tests passed. I also checked the related behaviors covered by the suite: a new user starts at 1, listening twice on the same day does not double count, normal consecutive days increment, and skipping a day resets the streak.
+
 <!-- Add one complete RCA entry per fixed bug. -->
 
 ---
